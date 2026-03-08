@@ -74,10 +74,9 @@ export const evaluatePose = (
 
   // y goes down from 0 (top) to 1 (bottom) in MediaPipe Image Coordinates
   const isStandingInt = () => {
+    // Relaxed standing check: Hips must be higher than knees
     return (landmarks[L_HIP].y < landmarks[L_KNEE].y - 0.05) &&
-           (landmarks[L_KNEE].y < landmarks[L_ANKLE].y - 0.05) &&
-           (landmarks[R_HIP].y < landmarks[R_KNEE].y - 0.05) &&
-           (landmarks[R_KNEE].y < landmarks[R_ANKLE].y - 0.05);
+           (landmarks[R_HIP].y < landmarks[R_KNEE].y - 0.05);
   };
 
   const areArmsCrossed = () => {
@@ -108,8 +107,8 @@ export const evaluatePose = (
   const isDeepSquat = () => {
     const hipAvgY = (landmarks[L_HIP].y + landmarks[R_HIP].y) / 2;
     const kneeAvgY = (landmarks[L_KNEE].y + landmarks[R_KNEE].y) / 2;
-    // hip Y > knee Y means hips are physically lower than or equal to knees
-    return hipAvgY > kneeAvgY - 0.2; // removed strict (!areLegsCrossed()) requirement which was causing failures
+    // hip Y bounds softened significantly to just be "near" the knees
+    return hipAvgY > kneeAvgY - 0.3; 
   };
 
   ctx.debugInfo = {
@@ -156,12 +155,13 @@ export const evaluatePose = (
     case PoseState.LEGS_CROSSED:
       ctx.message = "Legs crossed. Sit down while keeping legs/arms crossed.";
       if (ctx.debugInfo.sitting) {
-        if (timestampMs - ctx.stateEnteredAtMs >= 500) {
+        // PDF Rule 5: Sit down on the floor for 2 seconds
+        if (timestampMs - ctx.stateEnteredAtMs >= 2000) {
           ctx.currentState = PoseState.SITTING_DOWN;
           ctx.stateEnteredAtMs = timestampMs;
           ctx.recommendation = "";
         } else {
-          ctx.recommendation = "Hold the sitting position steady...";
+          ctx.recommendation = `Hold the sitting position steady... (${Math.max(0, 2 - (timestampMs - ctx.stateEnteredAtMs)/1000).toFixed(1)}s remaining)`;
         }
       } else {
         ctx.stateEnteredAtMs = timestampMs;
@@ -172,11 +172,12 @@ export const evaluatePose = (
     case PoseState.SITTING_DOWN:
       ctx.message = "Great! Drive one knee forward to touch the floor.";
       if (ctx.debugInfo.kneeTouching) {
-        if (timestampMs - ctx.stateEnteredAtMs >= 500) {
+        // PDF Rule 7: Maintain this posture for 1 second
+        if (timestampMs - ctx.stateEnteredAtMs >= 1000) {
           ctx.currentState = PoseState.KNEE_TOUCH;
           ctx.recommendation = "";
         } else {
-          ctx.recommendation = "Hold the knee touch cleanly...";
+          ctx.recommendation = `Hold the knee touch cleanly... (${Math.max(0, 1 - (timestampMs - ctx.stateEnteredAtMs)/1000).toFixed(1)}s remaining)`;
         }
       } else {
         ctx.stateEnteredAtMs = timestampMs;
@@ -186,9 +187,12 @@ export const evaluatePose = (
 
     case PoseState.KNEE_TOUCH:
       ctx.message = "Knee touched! Uncross legs and fall back into a deep squat.";
-      if (ctx.debugInfo.deepSquat || ctx.debugInfo.sitting) {
+      // PDF Rule 8: Once knee is on the ground, remove the crossed leg and fall back to sit on deep squat
+      if (ctx.debugInfo.deepSquat || (ctx.debugInfo.sitting && !ctx.debugInfo.legsCrossed)) {
         ctx.currentState = PoseState.DEEP_SQUAT;
         ctx.recommendation = "";
+      } else if (ctx.debugInfo.legsCrossed) {
+        ctx.recommendation = "Uncross your legs entirely to transition into the deep squat.";
       } else {
         ctx.recommendation = "Sit back with your hips physically lower than your knees.";
       }
@@ -196,7 +200,10 @@ export const evaluatePose = (
 
     case PoseState.DEEP_SQUAT:
       ctx.message = "Deep squat locked! Stand tall with heels grounded to finish the rep.";
-      if (ctx.debugInfo.isStanding) {
+      // To ensure reps increment, allow either strict standing or if hips raise significantly above knees
+      const hipsRaised = ((landmarks[L_HIP].y + landmarks[R_HIP].y)/2) < (((landmarks[L_KNEE].y + landmarks[R_KNEE].y)/2) - 0.2);
+      
+      if (ctx.debugInfo.isStanding || hipsRaised) {
         // Save the failures recorded during this rep
         ctx.repFeedback.push(Array.from(ctx.currentRepFailures));
         ctx.currentRepFailures = new Set<string>(); // reset for next rep
