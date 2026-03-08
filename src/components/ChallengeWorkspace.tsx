@@ -1,13 +1,17 @@
 import { useState, useRef, useEffect } from 'react';
 import { VideoUploader } from './VideoUploader';
-import { Activity, CheckCircle2 } from 'lucide-react';
+import { Activity, CheckCircle2, Zap } from 'lucide-react';
 import { usePoseTracker } from '../hooks/usePoseTracker';
 import { drawSkeleton } from '../utils/drawing';
 import { evaluatePose, INITIAL_CONTEXT, PoseState, POSE_STATE_NAMES } from '../utils/rulesEngine';
 import type { TrackingContext } from '../utils/rulesEngine';
+import { publishRep, subscribeToReps } from '../utils/firebase';
+import type { RepRecord } from '../utils/firebase';
 
 export const ChallengeWorkspace = () => {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [personName, setPersonName] = useState('');
+  const [uploadedAt, setUploadedAt] = useState('');
   const { isLoaded, detectFrame } = usePoseTracker();
   
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -15,6 +19,18 @@ export const ChallengeWorkspace = () => {
   const requestRef = useRef<number>(0);
   
   const [context, setContext] = useState<TrackingContext>(INITIAL_CONTEXT);
+  const prevRepsRef = useRef<number>(0);
+  const prevContextRef = useRef<TrackingContext>(INITIAL_CONTEXT);
+
+  const sessionId = useRef<string>(
+    localStorage.getItem('formCheckSessionId') || (() => {
+      const id = `session_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      localStorage.setItem('formCheckSessionId', id);
+      return id;
+    })()
+  ).current;
+
+  const [liveReps, setLiveReps] = useState<RepRecord[]>([]);
 
   const processVideoOptions = () => {
     if (!videoRef.current || !canvasRef.current || !isLoaded) return;
@@ -46,7 +62,26 @@ export const ChallengeWorkspace = () => {
       drawSkeleton(ctx, landmarks, canvas.width, canvas.height);
       
       // We process state transitions every frame using heuristic engine
-      setContext(prev => evaluatePose(landmarks, prev, video.currentTime * 1000));
+      setContext(prev => {
+        const next = evaluatePose(landmarks, prev, video.currentTime * 1000);
+        
+        // Detect when a rep just completed (reps incremented)
+        if (next.reps > prevRepsRef.current) {
+          const repIndex = next.reps - 1;
+          const corrections = next.repFeedback[repIndex] || [];
+          publishRep({
+            repNumber: next.reps,
+            score: next.score,
+            corrections,
+            sessionId,
+            personName,
+            uploadedAt,
+          });
+          prevRepsRef.current = next.reps;
+        }
+        prevContextRef.current = next;
+        return next;
+      });
     }
 
     requestRef.current = requestAnimationFrame(processVideoOptions);
@@ -61,10 +96,16 @@ export const ChallengeWorkspace = () => {
     };
   }, [isLoaded, videoUrl, detectFrame]);
 
+  // Subscribe to live Firestore rep stream
+  useEffect(() => {
+    const unsubscribe = subscribeToReps(sessionId, setLiveReps);
+    return () => unsubscribe();
+  }, [sessionId]);
+
   if (!videoUrl) {
     return (
       <div style={{ padding: '2rem', display: 'flex', alignItems: 'center', height: '100%' }}>
-         <VideoUploader onVideoSelected={setVideoUrl} />
+         <VideoUploader onVideoSelected={(url, name, ts) => { setVideoUrl(url); setPersonName(name); setUploadedAt(ts); }} />
       </div>
     );
   }
@@ -112,12 +153,38 @@ export const ChallengeWorkspace = () => {
           <h3 style={{ fontSize: '1.25rem', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem', fontWeight: 600 }}>
              <Activity className="gradient-text" /> Live Scoreboard
           </h3>
+          {personName && (
+            <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>
+              👤 {personName}
+              {uploadedAt && <span style={{ opacity: 0.6, marginLeft: '0.5rem' }}>· {new Date(uploadedAt).toLocaleString()}</span>}
+            </p>
+          )}
           <div style={{ fontSize: '5rem', fontWeight: 700, lineHeight: 1, textAlign: 'center', marginBottom: '1rem', textShadow: '0 0 40px var(--accent-glow)' }} className="gradient-text">
             {context.score} <span style={{ fontSize: '2rem', color: 'var(--text-secondary)' }}>/ 80</span>
           </div>
           <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '1.125rem', fontWeight: 500 }}>
              Rep {context.reps} of 10
           </p>
+
+          {/* Live Rep Timeline from Firestore */}
+          {liveReps.length > 0 && (
+            <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
+              <h5 style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', fontSize: '0.85rem' }}>
+                <Zap size={14} /> Live Rep Feed
+              </h5>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '200px', overflowY: 'auto' }}>
+                {liveReps.map((rep, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0.75rem', background: 'var(--bg-primary)', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem' }}>
+                    <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>Rep {rep.repNumber}</span>
+                    <span style={{ color: 'var(--success)' }}>+{8} pts</span>
+                    {rep.corrections.length > 0 && (
+                      <span style={{ color: 'var(--error)', fontSize: '0.7rem' }}>⚠ {rep.corrections.length} correction{rep.corrections.length > 1 ? 's' : ''}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         
         <div className="glass" style={{ padding: '2rem', flex: 1, overflowY: 'auto' }}>
