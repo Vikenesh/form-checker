@@ -171,12 +171,17 @@ export const evaluatePose = (
           ctx.accumulatedHoldMs = 0;
           ctx.recommendation = "";
         } else {
-          ctx.recommendation = `Hold the sitting position steady... (${Math.max(0, 2 - ctx.accumulatedHoldMs/1000).toFixed(1)}s remaining)`;
+          // Actively holding — show countdown only, not a correction
+          const remaining = Math.max(0, 2 - ctx.accumulatedHoldMs / 1000).toFixed(1);
+          ctx.message = `Sitting — hold for ${remaining}s more...`;
+          ctx.recommendation = ""; // clear any previous correction
         }
       } else {
-        // Drain accumulator on dropped frames instead of instantly resetting, allows for camera jitter
+        // Only flag as correction AFTER a successful hold started and then broke
         ctx.accumulatedHoldMs = Math.max(0, ctx.accumulatedHoldMs - (deltaMs * 1.5));
-        ctx.recommendation = "Lower your hips all the way down close to your ankles.";
+        if (ctx.accumulatedHoldMs === 0) {
+          ctx.recommendation = "Lower your hips all the way down close to your ankles.";
+        }
       }
       break;
 
@@ -190,11 +195,16 @@ export const evaluatePose = (
           ctx.accumulatedHoldMs = 0;
           ctx.recommendation = "";
         } else {
-          ctx.recommendation = `Hold the knee touch cleanly... (${Math.max(0, 1 - ctx.accumulatedHoldMs/1000).toFixed(1)}s remaining)`;
+          // Actively holding — show countdown only, not a correction
+          const remaining = Math.max(0, 1 - ctx.accumulatedHoldMs / 1000).toFixed(1);
+          ctx.message = `Knee on floor — hold for ${remaining}s more...`;
+          ctx.recommendation = ""; // clear any previous correction
         }
       } else {
         ctx.accumulatedHoldMs = Math.max(0, ctx.accumulatedHoldMs - (deltaMs * 1.5));
-        ctx.recommendation = "Lean forward and touch one of your knees fully to the floor.";
+        if (ctx.accumulatedHoldMs === 0) {
+          ctx.recommendation = "Lean forward and touch one of your knees fully to the floor.";
+        }
       }
       break;
 
