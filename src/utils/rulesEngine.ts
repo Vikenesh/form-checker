@@ -28,6 +28,8 @@ export interface TrackingContext {
   recommendation?: string;
   repFeedback: string[][];
   currentRepFailures: Set<string>;
+  accumulatedHoldMs: number;
+  lastProcessedMs: number;
 }
 
 export const INITIAL_CONTEXT: TrackingContext = {
@@ -40,6 +42,8 @@ export const INITIAL_CONTEXT: TrackingContext = {
   recommendation: "",
   repFeedback: [],
   currentRepFailures: new Set<string>(),
+  accumulatedHoldMs: 0,
+  lastProcessedMs: 0,
 };
 
 const getDist = (a: NormalizedLandmark, b: NormalizedLandmark) => 
@@ -61,6 +65,9 @@ export const evaluatePose = (
   if (context.reps >= 10) return { ...context, message: "Challenge Completed!" };
 
   const ctx = { ...context };
+  
+  const deltaMs = ctx.lastProcessedMs === 0 ? 0 : timestampMs - ctx.lastProcessedMs;
+  ctx.lastProcessedMs = timestampMs;
 
   // Safety check for visibility of key joints
   const keyJoints = [L_HIP, R_HIP, L_KNEE, R_KNEE, L_ANKLE, R_ANKLE, L_SHOULDER, R_SHOULDER];
@@ -139,6 +146,7 @@ export const evaluatePose = (
       if (ctx.debugInfo.legsCrossed) {
         ctx.currentState = PoseState.LEGS_CROSSED;
         ctx.stateEnteredAtMs = timestampMs;
+        ctx.accumulatedHoldMs = 0;
         ctx.recommendation = "";
       } else {
         // If they sit down too fast, just skip to legs crossed state
@@ -155,16 +163,19 @@ export const evaluatePose = (
     case PoseState.LEGS_CROSSED:
       ctx.message = "Legs crossed. Sit down while keeping legs/arms crossed.";
       if (ctx.debugInfo.sitting) {
+        ctx.accumulatedHoldMs += deltaMs;
         // PDF Rule 5: Sit down on the floor for 2 seconds
-        if (timestampMs - ctx.stateEnteredAtMs >= 2000) {
+        if (ctx.accumulatedHoldMs >= 2000) {
           ctx.currentState = PoseState.SITTING_DOWN;
           ctx.stateEnteredAtMs = timestampMs;
+          ctx.accumulatedHoldMs = 0;
           ctx.recommendation = "";
         } else {
-          ctx.recommendation = `Hold the sitting position steady... (${Math.max(0, 2 - (timestampMs - ctx.stateEnteredAtMs)/1000).toFixed(1)}s remaining)`;
+          ctx.recommendation = `Hold the sitting position steady... (${Math.max(0, 2 - ctx.accumulatedHoldMs/1000).toFixed(1)}s remaining)`;
         }
       } else {
-        ctx.stateEnteredAtMs = timestampMs;
+        // Drain accumulator on dropped frames instead of instantly resetting, allows for camera jitter
+        ctx.accumulatedHoldMs = Math.max(0, ctx.accumulatedHoldMs - (deltaMs * 1.5));
         ctx.recommendation = "Lower your hips all the way down close to your ankles.";
       }
       break;
@@ -172,15 +183,17 @@ export const evaluatePose = (
     case PoseState.SITTING_DOWN:
       ctx.message = "Great! Drive one knee forward to touch the floor.";
       if (ctx.debugInfo.kneeTouching) {
+        ctx.accumulatedHoldMs += deltaMs;
         // PDF Rule 7: Maintain this posture for 1 second
-        if (timestampMs - ctx.stateEnteredAtMs >= 1000) {
+        if (ctx.accumulatedHoldMs >= 1000) {
           ctx.currentState = PoseState.KNEE_TOUCH;
+          ctx.accumulatedHoldMs = 0;
           ctx.recommendation = "";
         } else {
-          ctx.recommendation = `Hold the knee touch cleanly... (${Math.max(0, 1 - (timestampMs - ctx.stateEnteredAtMs)/1000).toFixed(1)}s remaining)`;
+          ctx.recommendation = `Hold the knee touch cleanly... (${Math.max(0, 1 - ctx.accumulatedHoldMs/1000).toFixed(1)}s remaining)`;
         }
       } else {
-        ctx.stateEnteredAtMs = timestampMs;
+        ctx.accumulatedHoldMs = Math.max(0, ctx.accumulatedHoldMs - (deltaMs * 1.5));
         ctx.recommendation = "Lean forward and touch one of your knees fully to the floor.";
       }
       break;
@@ -190,6 +203,7 @@ export const evaluatePose = (
       // PDF Rule 8: Once knee is on the ground, remove the crossed leg and fall back to sit on deep squat
       if (ctx.debugInfo.deepSquat || (ctx.debugInfo.sitting && !ctx.debugInfo.legsCrossed)) {
         ctx.currentState = PoseState.DEEP_SQUAT;
+        ctx.accumulatedHoldMs = 0;
         ctx.recommendation = "";
       } else if (ctx.debugInfo.legsCrossed) {
         ctx.recommendation = "Uncross your legs entirely to transition into the deep squat.";
