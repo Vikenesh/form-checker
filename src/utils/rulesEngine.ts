@@ -99,15 +99,17 @@ export const evaluatePose = (
   };
 
   const isKneeTouching = () => {
-    const maxAnkleY = Math.max(landmarks[L_ANKLE].y, landmarks[R_ANKLE].y);
-    return landmarks[L_KNEE].y > maxAnkleY - 0.15 || landmarks[R_KNEE].y > maxAnkleY - 0.15;
+    // MediaPipe Y is 0 at top, 1 at bottom.
+    // If knee Y is roughly equal to or greater than the average ankle Y, it's touching the ground.
+    const avgAnkleY = (landmarks[L_ANKLE].y + landmarks[R_ANKLE].y) / 2;
+    return landmarks[L_KNEE].y > avgAnkleY - 0.2 || landmarks[R_KNEE].y > avgAnkleY - 0.2;
   };
 
   const isDeepSquat = () => {
     const hipAvgY = (landmarks[L_HIP].y + landmarks[R_HIP].y) / 2;
     const kneeAvgY = (landmarks[L_KNEE].y + landmarks[R_KNEE].y) / 2;
     // hip Y > knee Y means hips are physically lower than or equal to knees
-    return hipAvgY > kneeAvgY - 0.1 && (!areLegsCrossed());
+    return hipAvgY > kneeAvgY - 0.2; // removed strict (!areLegsCrossed()) requirement which was causing failures
   };
 
   ctx.debugInfo = {
@@ -140,7 +142,14 @@ export const evaluatePose = (
         ctx.stateEnteredAtMs = timestampMs;
         ctx.recommendation = "";
       } else {
-        ctx.recommendation = "Cross one ankle completely over the other so your feet overlap.";
+        // If they sit down too fast, just skip to legs crossed state
+        if (ctx.debugInfo.sitting) {
+            ctx.currentState = PoseState.LEGS_CROSSED;
+            ctx.stateEnteredAtMs = timestampMs;
+            ctx.recommendation = "";
+        } else {
+            ctx.recommendation = "Cross one ankle completely over the other so your feet overlap.";
+        }
       }
       break;
 
@@ -177,11 +186,11 @@ export const evaluatePose = (
 
     case PoseState.KNEE_TOUCH:
       ctx.message = "Knee touched! Uncross legs and fall back into a deep squat.";
-      if (ctx.debugInfo.deepSquat) {
+      if (ctx.debugInfo.deepSquat || ctx.debugInfo.sitting) {
         ctx.currentState = PoseState.DEEP_SQUAT;
         ctx.recommendation = "";
       } else {
-        ctx.recommendation = "Uncross your legs entirely and sit back with your hips physically lower than your knees.";
+        ctx.recommendation = "Sit back with your hips physically lower than your knees.";
       }
       break;
 
