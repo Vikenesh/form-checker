@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
 import { VideoUploader } from './VideoUploader';
-import { Activity, CheckCircle2, Zap } from 'lucide-react';
+import { Activity, CheckCircle2 } from 'lucide-react';
 import { usePoseTracker } from '../hooks/usePoseTracker';
 import { drawSkeleton } from '../utils/drawing';
 import { evaluatePose, INITIAL_CONTEXT, PoseState, POSE_STATE_NAMES } from '../utils/rulesEngine';
 import type { TrackingContext } from '../utils/rulesEngine';
-import { publishRep, subscribeToReps } from '../utils/firebase';
-import type { RepRecord } from '../utils/firebase';
+import { publishRep } from '../utils/firebase';
+
 
 export const ChallengeWorkspace = () => {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -22,6 +22,7 @@ export const ChallengeWorkspace = () => {
   const prevRepsRef = useRef<number>(0);
   const prevContextRef = useRef<TrackingContext>(INITIAL_CONTEXT);
 
+  // Session-based state
   const [sessionId, setSessionId] = useState<string>(() => {
     const saved = localStorage.getItem('formCheckSessionId');
     if (saved) return saved;
@@ -35,12 +36,9 @@ export const ChallengeWorkspace = () => {
     localStorage.setItem('formCheckSessionId', newId);
     setSessionId(newId);
     setContext(INITIAL_CONTEXT);
-    setLiveReps([]);
     prevRepsRef.current = 0;
     prevContextRef.current = INITIAL_CONTEXT;
   };
-
-  const [liveReps, setLiveReps] = useState<RepRecord[]>([]);
 
   const processVideoOptions = () => {
     if (!videoRef.current || !canvasRef.current || !isLoaded) return;
@@ -106,11 +104,7 @@ export const ChallengeWorkspace = () => {
     };
   }, [isLoaded, videoUrl, detectFrame]);
 
-  // Subscribe to live Firestore rep stream
-  useEffect(() => {
-    const unsubscribe = subscribeToReps(sessionId, setLiveReps);
-    return () => unsubscribe();
-  }, [sessionId]);
+
 
   if (!videoUrl) {
     return (
@@ -189,25 +183,7 @@ export const ChallengeWorkspace = () => {
             Upload New Video
           </button>
 
-          {/* Live Rep Timeline from Firestore */}
-          {liveReps.length > 0 && (
-            <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
-              <h5 style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', fontSize: '0.85rem' }}>
-                <Zap size={14} /> Live Rep Feed
-              </h5>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '200px', overflowY: 'auto' }}>
-                {liveReps.map((rep, i) => (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0.75rem', background: 'var(--bg-primary)', borderRadius: 'var(--radius-sm)', fontSize: '0.8rem' }}>
-                    <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>Rep {rep.repNumber}</span>
-                    <span style={{ color: 'var(--success)' }}>+{8} pts</span>
-                    {rep.corrections.length > 0 && (
-                      <span style={{ color: 'var(--error)', fontSize: '0.7rem' }}>⚠ {rep.corrections.length} correction{rep.corrections.length > 1 ? 's' : ''}</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+
         </div>
         
         <div className="glass" style={{ padding: '2rem', flex: 1, overflowY: 'auto' }}>

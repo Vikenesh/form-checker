@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: "AIzaSyAuto-generated-placeholder",
@@ -34,18 +34,4 @@ export async function publishRep(rep: Omit<RepRecord, 'timestamp'>) {
   } catch (e) {
     console.warn('Failed to publish rep to Firestore:', e);
   }
-}
-
-// Subscribe to live reps for a given session
-export function subscribeToReps(
-  sessionId: string,
-  onUpdate: (reps: RepRecord[]) => void
-): () => void {
-  const q = query(collection(db, 'reps'), orderBy('timestamp', 'asc'));
-  return onSnapshot(q, (snapshot) => {
-    const reps = snapshot.docs
-      .map(d => d.data() as RepRecord)
-      .filter(r => r.sessionId === sessionId);
-    onUpdate(reps);
-  }, (err) => console.warn('Firestore subscription error:', err));
 }
