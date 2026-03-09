@@ -22,13 +22,23 @@ export const ChallengeWorkspace = () => {
   const prevRepsRef = useRef<number>(0);
   const prevContextRef = useRef<TrackingContext>(INITIAL_CONTEXT);
 
-  const sessionId = useRef<string>(
-    localStorage.getItem('formCheckSessionId') || (() => {
-      const id = `session_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      localStorage.setItem('formCheckSessionId', id);
-      return id;
-    })()
-  ).current;
+  const [sessionId, setSessionId] = useState<string>(() => {
+    const saved = localStorage.getItem('formCheckSessionId');
+    if (saved) return saved;
+    const id = `session_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    localStorage.setItem('formCheckSessionId', id);
+    return id;
+  });
+
+  const resetSession = () => {
+    const newId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    localStorage.setItem('formCheckSessionId', newId);
+    setSessionId(newId);
+    setContext(INITIAL_CONTEXT);
+    setLiveReps([]);
+    prevRepsRef.current = 0;
+    prevContextRef.current = INITIAL_CONTEXT;
+  };
 
   const [liveReps, setLiveReps] = useState<RepRecord[]>([]);
 
@@ -105,7 +115,12 @@ export const ChallengeWorkspace = () => {
   if (!videoUrl) {
     return (
       <div style={{ padding: '2rem', display: 'flex', alignItems: 'center', height: '100%' }}>
-         <VideoUploader onVideoSelected={(url, name, ts) => { setVideoUrl(url); setPersonName(name); setUploadedAt(ts); }} />
+         <VideoUploader onVideoSelected={(url, name, ts) => { 
+           resetSession();
+           setVideoUrl(url); 
+           setPersonName(name); 
+           setUploadedAt(ts); 
+         }} />
       </div>
     );
   }
@@ -162,9 +177,17 @@ export const ChallengeWorkspace = () => {
           <div style={{ fontSize: '5rem', fontWeight: 700, lineHeight: 1, textAlign: 'center', marginBottom: '1rem', textShadow: '0 0 40px var(--accent-glow)' }} className="gradient-text">
             {context.score} <span style={{ fontSize: '2rem', color: 'var(--text-secondary)' }}>/ 80</span>
           </div>
-          <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '1.125rem', fontWeight: 500 }}>
+          <p style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '1.125rem', fontWeight: 500, marginBottom: '1.5rem' }}>
              Rep {context.reps} of 10
           </p>
+
+          <button 
+            className="btn-secondary" 
+            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginBottom: '1rem' }}
+            onClick={() => setVideoUrl(null)}
+          >
+            Upload New Video
+          </button>
 
           {/* Live Rep Timeline from Firestore */}
           {liveReps.length > 0 && (
