@@ -5,8 +5,11 @@ export const PoseState = {
   ARMS_CROSSED: 1,
   LEGS_CROSSED: 2,
   SITTING_DOWN: 3,
-  KNEE_TOUCH: 4,
-  DEEP_SQUAT: 5,
+  SIT_ON_FLOOR: 4,
+  DRIVE_KNEE: 5,
+  KNEE_TOUCH: 6,
+  DEEP_SQUAT: 7,
+  FINAL_STAND: 8,
 };
 
 export const POSE_STATE_NAMES = {
@@ -14,8 +17,11 @@ export const POSE_STATE_NAMES = {
   [PoseState.ARMS_CROSSED]: "2. Cross hands on opposite shoulders",
   [PoseState.LEGS_CROSSED]: "3. Cross your legs",
   [PoseState.SITTING_DOWN]: "4. Sit down with legs crossed",
-  [PoseState.KNEE_TOUCH]: "5. Drive knee forward to touch floor",
-  [PoseState.DEEP_SQUAT]: "6. Drop into deep squat (Uncross legs)",
+  [PoseState.SIT_ON_FLOOR]: "5. Sit on the floor",
+  [PoseState.DRIVE_KNEE]: "6. Drive knee forward (Legs crossed)",
+  [PoseState.KNEE_TOUCH]: "7. Knee touching the ground",
+  [PoseState.DEEP_SQUAT]: "8. Uncross legs & drop to deep squat",
+  [PoseState.FINAL_STAND]: "9. Stand tall (Heels grounded)",
 };
 
 // Critical failure keys — any of these set to true will disqualify the rep
@@ -80,7 +86,7 @@ const L_WRIST = 15, R_WRIST = 16;
 const L_HIP = 23, R_HIP = 24;
 const L_KNEE = 25, R_KNEE = 26;
 const L_ANKLE = 27, R_ANKLE = 28;
-const MIN_VISIBILITY = 0.4;
+const MIN_VISIBILITY = 0.3; // Lowered to avoid interruptions during crouch/sit
 
 export const evaluatePose = (
   landmarks: NormalizedLandmark[], 
@@ -92,7 +98,6 @@ export const evaluatePose = (
 
   const ctx = { ...context };
   
-  const deltaMs = ctx.lastProcessedMs === 0 ? 0 : timestampMs - ctx.lastProcessedMs;
   ctx.lastProcessedMs = timestampMs;
 
   // Safety check for visibility of key joints
@@ -107,13 +112,13 @@ export const evaluatePose = (
 
   // y goes down from 0 (top) to 1 (bottom) in MediaPipe Image Coordinates
   const isStandingInt = () => {
-    // Strict standing check: Shoulders above hips, hips above knees, knees above ankles
-    const hipsAboveKnees = (landmarks[L_HIP].y < landmarks[L_KNEE].y - 0.1) &&
-                           (landmarks[R_HIP].y < landmarks[R_KNEE].y - 0.1);
-    const kneesAboveAnkles = (landmarks[L_KNEE].y < landmarks[L_ANKLE].y - 0.1) &&
-                             (landmarks[R_KNEE].y < landmarks[R_ANKLE].y - 0.1);
-    const shouldersAboveHips = (landmarks[L_SHOULDER].y < landmarks[L_HIP].y - 0.1) &&
-                               (landmarks[R_SHOULDER].y < landmarks[R_HIP].y - 0.1);
+    // Permissive standing check: Shoulders above hips, hips above knees, knees above ankles
+    const hipsAboveKnees = (landmarks[L_HIP].y < landmarks[L_KNEE].y - 0.05) &&
+                           (landmarks[R_HIP].y < landmarks[R_KNEE].y - 0.05);
+    const kneesAboveAnkles = (landmarks[L_KNEE].y < landmarks[L_ANKLE].y - 0.05) &&
+                             (landmarks[R_KNEE].y < landmarks[R_ANKLE].y - 0.05);
+    const shouldersAboveHips = (landmarks[L_SHOULDER].y < landmarks[L_HIP].y - 0.05) &&
+                               (landmarks[R_SHOULDER].y < landmarks[R_HIP].y - 0.05);
                                
     return hipsAboveKnees && kneesAboveAnkles && shouldersAboveHips;
   };
@@ -146,8 +151,8 @@ export const evaluatePose = (
   const isDeepSquat = () => {
     const hipAvgY = (landmarks[L_HIP].y + landmarks[R_HIP].y) / 2;
     const kneeAvgY = (landmarks[L_KNEE].y + landmarks[R_KNEE].y) / 2;
-    // For a deep squat, hips should be near or below the knees
-    return hipAvgY > kneeAvgY - 0.1; 
+    // Permissive deep squat: Hips near or below knees
+    return hipAvgY > kneeAvgY - 0.05; 
   };
 
   ctx.debugInfo = {
@@ -161,95 +166,93 @@ export const evaluatePose = (
 
   switch (ctx.currentState) {
     case PoseState.STANDING_START:
-      ctx.message = "Stand tall, now cross your arms on your shoulders!";
-      if (ctx.debugInfo.isStanding && ctx.debugInfo.armsCrossed) {
+      ctx.message = "1. Stand tall, place legs shoulder width apart!";
+      if (ctx.debugInfo.isStanding) {
         ctx.currentState = PoseState.ARMS_CROSSED;
         ctx.recommendation = "";
-      } else if (!ctx.debugInfo.isStanding) {
-        ctx.recommendation = "Stand fully straight with hips and knees extended.";
-      } else if (!ctx.debugInfo.armsCrossed) {
-        ctx.recommendation = "Cross arms and rest your hands firmly on your opposite shoulders.";
+      } else {
+        ctx.recommendation = "Please stand tall and ensure full body is visible.";
       }
       break;
 
     case PoseState.ARMS_CROSSED:
-      ctx.message = "Arms crossed! Now cross your legs.";
-      // Relaxed backwards checking to avoid jitter failing
-      if (ctx.debugInfo.legsCrossed) {
+      ctx.message = "2. Cross your hands on opposite shoulders!";
+      if (ctx.debugInfo.armsCrossed) {
         ctx.currentState = PoseState.LEGS_CROSSED;
-        ctx.stateEnteredAtMs = timestampMs;
-        ctx.accumulatedHoldMs = 0;
         ctx.recommendation = "";
       } else {
-        // If they sit down too fast, just skip to legs crossed state
-        if (ctx.debugInfo.sitting) {
-            ctx.currentState = PoseState.LEGS_CROSSED;
-            ctx.stateEnteredAtMs = timestampMs;
-            ctx.recommendation = "";
-        } else {
-            ctx.recommendation = "Cross one ankle completely over the other so your feet overlap.";
-        }
+        ctx.recommendation = "Cross your hands and place them on your opposite shoulders.";
       }
       break;
 
     case PoseState.LEGS_CROSSED:
-      ctx.message = "Legs crossed. Sit down while keeping legs/arms crossed.";
-      if (ctx.debugInfo.sitting && ctx.debugInfo.legsCrossed) {
-        ctx.legsWereCrossedDuringSit = true; // ✅ legs crossed while sitting — required
+      ctx.message = "3. Now cross your legs!";
+      if (ctx.debugInfo.legsCrossed) {
         ctx.currentState = PoseState.SITTING_DOWN;
-        ctx.stateEnteredAtMs = timestampMs;
-        ctx.accumulatedHoldMs = 0;
         ctx.recommendation = "";
       } else {
-        ctx.accumulatedHoldMs = Math.max(0, ctx.accumulatedHoldMs - (deltaMs * 1.5));
-        if (ctx.accumulatedHoldMs === 0) {
-          if (ctx.debugInfo.sitting && !ctx.debugInfo.legsCrossed) {
-            ctx.recommendation = "Make sure your legs remain crossed while sitting down.";
-          } else {
-            ctx.recommendation = "Lower your hips all the way down close to your ankles while keeping legs crossed.";
-          }
-        }
+        ctx.recommendation = "Cross your legs completely.";
       }
       break;
 
     case PoseState.SITTING_DOWN:
-      ctx.message = "Great! Drive one knee forward to touch the floor.";
-      if (ctx.debugInfo.kneeTouching && ctx.debugInfo.legsCrossed) {
-        ctx.kneeDidTouch = true; // ✅ knee touched floor — required
-        ctx.currentState = PoseState.KNEE_TOUCH;
-        ctx.accumulatedHoldMs = 0;
+      ctx.message = "4. Sit down with legs crossed!";
+      if (ctx.debugInfo.sitting && ctx.debugInfo.legsCrossed) {
+        ctx.legsWereCrossedDuringSit = true; 
+        ctx.currentState = PoseState.SIT_ON_FLOOR;
         ctx.recommendation = "";
+      } else if (ctx.debugInfo.sitting && !ctx.debugInfo.legsCrossed) {
+         ctx.recommendation = "Keep your legs crossed while sitting down.";
       } else {
-        ctx.accumulatedHoldMs = Math.max(0, ctx.accumulatedHoldMs - (deltaMs * 1.5));
-        if (ctx.accumulatedHoldMs === 0) {
-          if (ctx.debugInfo.kneeTouching && !ctx.debugInfo.legsCrossed) {
-            ctx.recommendation = "Keep your legs crossed while driving your knee forward.";
-          } else {
-            ctx.recommendation = "Lean forward and touch one of your knees fully to the floor.";
-          }
-        }
+         ctx.recommendation = "Slowly sit down while maintaining the posture.";
+      }
+      break;
+
+    case PoseState.SIT_ON_FLOOR:
+      ctx.message = "5. Sit on the floor! (Touching ground)";
+      if (ctx.debugInfo.sitting && ctx.debugInfo.legsCrossed) {
+        // We've already confirmed sitting, this is just to confirm the state
+        ctx.currentState = PoseState.DRIVE_KNEE;
+        ctx.recommendation = "";
+      }
+      break;
+
+    case PoseState.DRIVE_KNEE:
+      ctx.message = "6. Drive your knee forward (Keep legs crossed)!";
+      if (ctx.debugInfo.kneeTouching && ctx.debugInfo.legsCrossed) {
+        ctx.currentState = PoseState.KNEE_TOUCH;
+        ctx.recommendation = "";
+      } else if (ctx.debugInfo.kneeTouching && !ctx.debugInfo.legsCrossed) {
+        ctx.recommendation = "Make sure legs are crossed when knee hits the floor.";
+      } else {
+        ctx.recommendation = "Lean forward and drive one knee toward the floor.";
       }
       break;
 
     case PoseState.KNEE_TOUCH:
-      ctx.message = "Knee touched! Uncross legs and fall back into a deep squat.";
-      // Rule 8: Once knee is on the ground, remove the crossed leg and fall back to sit on deep squat
-      if (ctx.debugInfo.deepSquat && !ctx.debugInfo.legsCrossed) {
-        ctx.deepSquatReached = true; // ✅ deep squat reached — required
+      ctx.message = "7. Great! Knee touched floor.";
+      if (ctx.debugInfo.kneeTouching) {
+        ctx.kneeDidTouch = true;
         ctx.currentState = PoseState.DEEP_SQUAT;
-        ctx.accumulatedHoldMs = 0;
         ctx.recommendation = "";
-      } else if (ctx.debugInfo.legsCrossed) {
-        ctx.recommendation = "Uncross your legs entirely to transition into the deep squat.";
-      } else {
-        ctx.recommendation = "Sit back into a deep squat with your hips physically lower than your knees.";
       }
       break;
 
     case PoseState.DEEP_SQUAT:
-      ctx.message = "Deep squat locked! Stand tall with heels grounded to finish the rep.";
-      
-      // Must return to a fully standing tall position to complete the rep
+      ctx.message = "8. Uncross legs and drop into deep squat!";
+      if (ctx.debugInfo.deepSquat && !ctx.debugInfo.legsCrossed) {
+        ctx.deepSquatReached = true;
+        ctx.currentState = PoseState.FINAL_STAND;
+        ctx.recommendation = "";
+      } else if (ctx.debugInfo.legsCrossed) {
+        ctx.recommendation = "Uncross your legs to transition to deep squat.";
+      } else {
+        ctx.recommendation = "Lower your hips below your knees for a deep squat.";
+      }
+      break;
+
+    case PoseState.FINAL_STAND:
+      ctx.message = "9. Stand tall once again with heels grounded!";
       if (ctx.debugInfo.isStanding) {
         const repNum = ctx.reps + 1;
 
@@ -294,11 +297,11 @@ export const evaluatePose = (
         if (isValidRep) {
           ctx.message = `Rep ${ctx.reps} Complete! ✅ +8 points.`;
         } else {
-          ctx.message = `Rep ${ctx.reps} — ❌ 0 pts (${disqualifyingReasons.length} disqualifying issue${disqualifyingReasons.length > 1 ? 's' : ''}).`;
+          ctx.message = `Rep ${ctx.reps} — ❌ 0 pts (${disqualifyingReasons.length} issues).`;
         }
         ctx.recommendation = "";
       } else {
-        ctx.recommendation = "Push up through your heels until you are standing completely straight.";
+        ctx.recommendation = "Stand tall to complete the rep.";
       }
       break;
   }

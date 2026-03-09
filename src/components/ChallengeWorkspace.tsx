@@ -3,7 +3,7 @@ import { VideoUploader } from './VideoUploader';
 import { Activity, CheckCircle2 } from 'lucide-react';
 import { usePoseTracker } from '../hooks/usePoseTracker';
 import { drawSkeleton } from '../utils/drawing';
-import { evaluatePose, INITIAL_CONTEXT, PoseState, POSE_STATE_NAMES } from '../utils/rulesEngine';
+import { evaluatePose, INITIAL_CONTEXT, POSE_STATE_NAMES } from '../utils/rulesEngine';
 import type { TrackingContext, RepStatus } from '../utils/rulesEngine';
 import { publishRep } from '../utils/firebase';
 
@@ -204,7 +204,7 @@ export const ChallengeWorkspace = () => {
                 .map(([keyArg, name]) => {
                 const stepKey = Number(keyArg);
                 const isActive = stepKey === context.currentState;
-                const isCompleted = stepKey < context.currentState || (context.reps > 0 && context.currentState === PoseState.STANDING_START && stepKey !== PoseState.STANDING_START);
+                const isCompleted = stepKey < context.currentState;
 
                 let iconNode;
                 if (isCompleted) {
