@@ -10,12 +10,12 @@ export const PoseState = {
 };
 
 export const POSE_STATE_NAMES = {
-  [PoseState.STANDING_START]: "Standing Start",
-  [PoseState.ARMS_CROSSED]: "Arms Crossed",
-  [PoseState.LEGS_CROSSED]: "Legs Crossed",
-  [PoseState.SITTING_DOWN]: "Sitting Posture",
-  [PoseState.KNEE_TOUCH]: "Knee Touching Floor",
-  [PoseState.DEEP_SQUAT]: "Deep Squat",
+  [PoseState.STANDING_START]: "1. Stand tall (Shoulder width apart)",
+  [PoseState.ARMS_CROSSED]: "2. Cross hands on opposite shoulders",
+  [PoseState.LEGS_CROSSED]: "3. Cross your legs",
+  [PoseState.SITTING_DOWN]: "4. Sit down with legs crossed",
+  [PoseState.KNEE_TOUCH]: "5. Drive knee forward to touch floor",
+  [PoseState.DEEP_SQUAT]: "6. Drop into deep squat (Uncross legs)",
 };
 
 // Critical failure keys — any of these set to true will disqualify the rep
@@ -31,6 +31,7 @@ export interface RepStatus {
   pointsAwarded: number;
   disqualifyingReasons: string[];
   formCorrections: string[];
+  completionTime: string;
 }
 
 export interface TrackingContext {
@@ -195,18 +196,10 @@ export const evaluatePose = (
       ctx.message = "Legs crossed. Sit down while keeping legs/arms crossed.";
       if (ctx.debugInfo.sitting && ctx.debugInfo.legsCrossed) {
         ctx.legsWereCrossedDuringSit = true; // ✅ legs crossed while sitting — required
-        ctx.accumulatedHoldMs += deltaMs;
-        // Rule 5: Sit down on the floor for 2 seconds
-        if (ctx.accumulatedHoldMs >= 2000) {
-          ctx.currentState = PoseState.SITTING_DOWN;
-          ctx.stateEnteredAtMs = timestampMs;
-          ctx.accumulatedHoldMs = 0;
-          ctx.recommendation = "";
-        } else {
-          const remaining = Math.max(0, 2 - ctx.accumulatedHoldMs / 1000).toFixed(1);
-          ctx.message = `Sitting — hold for ${remaining}s more...`;
-          ctx.recommendation = "";
-        }
+        ctx.currentState = PoseState.SITTING_DOWN;
+        ctx.stateEnteredAtMs = timestampMs;
+        ctx.accumulatedHoldMs = 0;
+        ctx.recommendation = "";
       } else {
         ctx.accumulatedHoldMs = Math.max(0, ctx.accumulatedHoldMs - (deltaMs * 1.5));
         if (ctx.accumulatedHoldMs === 0) {
@@ -223,17 +216,9 @@ export const evaluatePose = (
       ctx.message = "Great! Drive one knee forward to touch the floor.";
       if (ctx.debugInfo.kneeTouching && ctx.debugInfo.legsCrossed) {
         ctx.kneeDidTouch = true; // ✅ knee touched floor — required
-        ctx.accumulatedHoldMs += deltaMs;
-        // Rule 7: Maintain this posture for 1 second
-        if (ctx.accumulatedHoldMs >= 1000) {
-          ctx.currentState = PoseState.KNEE_TOUCH;
-          ctx.accumulatedHoldMs = 0;
-          ctx.recommendation = "";
-        } else {
-          const remaining = Math.max(0, 1 - ctx.accumulatedHoldMs / 1000).toFixed(1);
-          ctx.message = `Knee on floor — hold for ${remaining}s more...`;
-          ctx.recommendation = "";
-        }
+        ctx.currentState = PoseState.KNEE_TOUCH;
+        ctx.accumulatedHoldMs = 0;
+        ctx.recommendation = "";
       } else {
         ctx.accumulatedHoldMs = Math.max(0, ctx.accumulatedHoldMs - (deltaMs * 1.5));
         if (ctx.accumulatedHoldMs === 0) {
@@ -289,6 +274,7 @@ export const evaluatePose = (
           pointsAwarded,
           disqualifyingReasons,
           formCorrections: Array.from(ctx.currentRepFailures),
+          completionTime: new Date(timestampMs).toLocaleTimeString(),
         };
 
         ctx.repStatus.push(status);

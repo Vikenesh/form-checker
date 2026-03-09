@@ -188,7 +188,7 @@ export const ChallengeWorkspace = () => {
         
         <div className="glass" style={{ padding: '2rem', flex: 1, overflowY: 'auto' }}>
           <h4 style={{ marginBottom: '0.5rem', fontSize: '1.125rem', fontWeight: 600, color: 'white' }}>Current Sequence</h4>
-          <p style={{ color: 'var(--accent-primary)', marginBottom: '1.5rem', fontSize: '0.875rem' }}>
+          <p style={{ color: 'var(--accent-primary)', marginBottom: '1rem', fontSize: '0.9rem', fontWeight: 600 }}>
             {context.message}
           </p>
 
@@ -199,7 +199,9 @@ export const ChallengeWorkspace = () => {
           )}
           
           <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-             {Object.entries(POSE_STATE_NAMES).map(([keyArg, name]) => {
+            {Object.entries(POSE_STATE_NAMES)
+                .sort((a,b) => Number(a[0]) - Number(b[0]))
+                .map(([keyArg, name]) => {
                 const stepKey = Number(keyArg);
                 const isActive = stepKey === context.currentState;
                 const isCompleted = stepKey < context.currentState || (context.reps > 0 && context.currentState === PoseState.STANDING_START && stepKey !== PoseState.STANDING_START);
@@ -248,10 +250,24 @@ export const ChallengeWorkspace = () => {
          {/* Rep-wise Form Correction Table */}
       <div style={{ gridColumn: 'span 12', paddingBottom: '2rem' }}>
         <div className="glass" style={{ padding: '2rem' }}>
-          <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem', fontWeight: 600 }}>Rep-wise Form Validations &amp; Corrections</h3>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', marginBottom: '1.5rem' }}>
-            🟢 Valid rep = 8 pts &nbsp;|&nbsp; 🔴 Invalid rep = 0 pts (disqualified) &nbsp;|&nbsp; ⚠ Form correction logged
-          </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+            <div>
+              <h3 style={{ fontSize: '1.25rem', marginBottom: '0.25rem', fontWeight: 600 }}>Rep-wise Form Validations &amp; Corrections</h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', margin: 0 }}>
+                🟢 Valid rep = 8 pts &nbsp;|&nbsp; 🔴 Invalid rep = 0 pts (disqualified) &nbsp;|&nbsp; ⚠ Form correction logged
+              </p>
+            </div>
+            <button 
+              className="btn-secondary" 
+              style={{ fontSize: '0.875rem', padding: '0.5rem 1rem' }}
+              onClick={() => {
+                resetSession();
+                setVideoUrl(null);
+              }}
+            >
+              Clear &amp; New Upload
+            </button>
+          </div>
           {context.repStatus.length === 0 ? (
             <p style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: '2rem' }}>No reps completed yet. Finish a rep to see feedback!</p>
           ) : (
@@ -260,6 +276,7 @@ export const ChallengeWorkspace = () => {
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border)' }}>
                     <th style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Rep</th>
+                    <th style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Time</th>
                     <th style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Status</th>
                     <th style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Points</th>
                     <th style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Disqualifying Reasons</th>
@@ -276,6 +293,7 @@ export const ChallengeWorkspace = () => {
                       }}
                     >
                       <td style={{ padding: '0.75rem 1rem', fontWeight: 700, color: 'var(--text-primary)' }}>Rep {rep.repNumber}</td>
+                      <td style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{rep.completionTime}</td>
                       <td style={{ padding: '0.75rem 1rem' }}>
                         {rep.valid
                           ? <span style={{ color: 'var(--success)', fontWeight: 700 }}>✅ Valid</span>
