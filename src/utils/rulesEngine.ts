@@ -114,8 +114,8 @@ export const evaluatePose = (
   const isDeepSquat = () => {
     const hipAvgY = (landmarks[L_HIP].y + landmarks[R_HIP].y) / 2;
     const kneeAvgY = (landmarks[L_KNEE].y + landmarks[R_KNEE].y) / 2;
-    // hip Y bounds softened significantly to just be "near" the knees
-    return hipAvgY > kneeAvgY - 0.3; 
+    // For a deep squat, hips should be near or below the knees
+    return hipAvgY > kneeAvgY - 0.1; 
   };
 
   ctx.debugInfo = {
@@ -162,7 +162,7 @@ export const evaluatePose = (
 
     case PoseState.LEGS_CROSSED:
       ctx.message = "Legs crossed. Sit down while keeping legs/arms crossed.";
-      if (ctx.debugInfo.sitting) {
+      if (ctx.debugInfo.sitting && ctx.debugInfo.legsCrossed) {
         ctx.accumulatedHoldMs += deltaMs;
         // PDF Rule 5: Sit down on the floor for 2 seconds
         if (ctx.accumulatedHoldMs >= 2000) {
@@ -180,14 +180,18 @@ export const evaluatePose = (
         // Only flag as correction AFTER a successful hold started and then broke
         ctx.accumulatedHoldMs = Math.max(0, ctx.accumulatedHoldMs - (deltaMs * 1.5));
         if (ctx.accumulatedHoldMs === 0) {
-          ctx.recommendation = "Lower your hips all the way down close to your ankles.";
+          if (ctx.debugInfo.sitting && !ctx.debugInfo.legsCrossed) {
+            ctx.recommendation = "Make sure your legs remain crossed while sitting down.";
+          } else {
+            ctx.recommendation = "Lower your hips all the way down close to your ankles while keeping legs crossed.";
+          }
         }
       }
       break;
 
     case PoseState.SITTING_DOWN:
       ctx.message = "Great! Drive one knee forward to touch the floor.";
-      if (ctx.debugInfo.kneeTouching) {
+      if (ctx.debugInfo.kneeTouching && ctx.debugInfo.legsCrossed) {
         ctx.accumulatedHoldMs += deltaMs;
         // PDF Rule 7: Maintain this posture for 1 second
         if (ctx.accumulatedHoldMs >= 1000) {
@@ -203,7 +207,11 @@ export const evaluatePose = (
       } else {
         ctx.accumulatedHoldMs = Math.max(0, ctx.accumulatedHoldMs - (deltaMs * 1.5));
         if (ctx.accumulatedHoldMs === 0) {
-          ctx.recommendation = "Lean forward and touch one of your knees fully to the floor.";
+          if (ctx.debugInfo.kneeTouching && !ctx.debugInfo.legsCrossed) {
+            ctx.recommendation = "Keep your legs crossed while driving your knee forward.";
+          } else {
+            ctx.recommendation = "Lean forward and touch one of your knees fully to the floor.";
+          }
         }
       }
       break;
@@ -211,14 +219,14 @@ export const evaluatePose = (
     case PoseState.KNEE_TOUCH:
       ctx.message = "Knee touched! Uncross legs and fall back into a deep squat.";
       // PDF Rule 8: Once knee is on the ground, remove the crossed leg and fall back to sit on deep squat
-      if (ctx.debugInfo.deepSquat || (ctx.debugInfo.sitting && !ctx.debugInfo.legsCrossed)) {
+      if (ctx.debugInfo.deepSquat && !ctx.debugInfo.legsCrossed) {
         ctx.currentState = PoseState.DEEP_SQUAT;
         ctx.accumulatedHoldMs = 0;
         ctx.recommendation = "";
       } else if (ctx.debugInfo.legsCrossed) {
         ctx.recommendation = "Uncross your legs entirely to transition into the deep squat.";
       } else {
-        ctx.recommendation = "Sit back with your hips physically lower than your knees.";
+        ctx.recommendation = "Sit back into a deep squat with your hips physically lower than your knees.";
       }
       break;
 
