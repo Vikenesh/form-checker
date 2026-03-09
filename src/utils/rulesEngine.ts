@@ -81,9 +81,15 @@ export const evaluatePose = (
 
   // y goes down from 0 (top) to 1 (bottom) in MediaPipe Image Coordinates
   const isStandingInt = () => {
-    // Relaxed standing check: Hips must be higher than knees
-    return (landmarks[L_HIP].y < landmarks[L_KNEE].y - 0.05) &&
-           (landmarks[R_HIP].y < landmarks[R_KNEE].y - 0.05);
+    // Strict standing check: Shoulders above hips, hips above knees, knees above ankles
+    const hipsAboveKnees = (landmarks[L_HIP].y < landmarks[L_KNEE].y - 0.1) &&
+                           (landmarks[R_HIP].y < landmarks[R_KNEE].y - 0.1);
+    const kneesAboveAnkles = (landmarks[L_KNEE].y < landmarks[L_ANKLE].y - 0.1) &&
+                             (landmarks[R_KNEE].y < landmarks[R_ANKLE].y - 0.1);
+    const shouldersAboveHips = (landmarks[L_SHOULDER].y < landmarks[L_HIP].y - 0.1) &&
+                               (landmarks[R_SHOULDER].y < landmarks[R_HIP].y - 0.1);
+                               
+    return hipsAboveKnees && kneesAboveAnkles && shouldersAboveHips;
   };
 
   const areArmsCrossed = () => {
@@ -232,10 +238,9 @@ export const evaluatePose = (
 
     case PoseState.DEEP_SQUAT:
       ctx.message = "Deep squat locked! Stand tall with heels grounded to finish the rep.";
-      // To ensure reps increment, allow either strict standing or if hips raise significantly above knees
-      const hipsRaised = ((landmarks[L_HIP].y + landmarks[R_HIP].y)/2) < (((landmarks[L_KNEE].y + landmarks[R_KNEE].y)/2) - 0.2);
       
-      if (ctx.debugInfo.isStanding || hipsRaised) {
+      // Must return to a fully standing tall position to increment rep
+      if (ctx.debugInfo.isStanding) {
         // Save the failures recorded during this rep
         ctx.repFeedback.push(Array.from(ctx.currentRepFailures));
         ctx.currentRepFailures = new Set<string>(); // reset for next rep
