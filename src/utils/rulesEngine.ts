@@ -18,16 +18,36 @@ export const POSE_STATE_NAMES = {
   [PoseState.DEEP_SQUAT]: "Deep Squat",
 };
 
+// Critical failure keys — any of these set to true will disqualify the rep
+export const CRITICAL_FAILURES = {
+  LEGS_NOT_CROSSED_SITTING: "Legs not crossed while sitting (Rule: legs must be crossed during sit)",
+  KNEE_DID_NOT_TOUCH: "Knee did not touch the floor (Rule: knee must touch floor forward)",
+  DEEP_SQUAT_NOT_PERFORMED: "Deep squat not performed (Rule: must be in deep squat before standing)",
+} as const;
+
+export interface RepStatus {
+  repNumber: number;
+  valid: boolean;
+  pointsAwarded: number;
+  disqualifyingReasons: string[];
+  formCorrections: string[];
+}
+
 export interface TrackingContext {
   currentState: number;
-  reps: number;
+  reps: number;           // total attempts (valid + invalid)
   score: number;
   stateEnteredAtMs: number;
   message: string;
   debugInfo: Record<string, boolean>;
   recommendation?: string;
   repFeedback: string[][];
+  repStatus: RepStatus[];
   currentRepFailures: Set<string>;
+  currentRepCriticalFailures: Set<string>;
+  legsWereCrossedDuringSit: boolean;
+  kneeDidTouch: boolean;
+  deepSquatReached: boolean;
   accumulatedHoldMs: number;
   lastProcessedMs: number;
 }
@@ -41,7 +61,12 @@ export const INITIAL_CONTEXT: TrackingContext = {
   debugInfo: {},
   recommendation: "",
   repFeedback: [],
+  repStatus: [],
   currentRepFailures: new Set<string>(),
+  currentRepCriticalFailures: new Set<string>(),
+  legsWereCrossedDuringSit: false,
+  kneeDidTouch: false,
+  deepSquatReached: false,
   accumulatedHoldMs: 0,
   lastProcessedMs: 0,
 };
@@ -169,21 +194,20 @@ export const evaluatePose = (
     case PoseState.LEGS_CROSSED:
       ctx.message = "Legs crossed. Sit down while keeping legs/arms crossed.";
       if (ctx.debugInfo.sitting && ctx.debugInfo.legsCrossed) {
+        ctx.legsWereCrossedDuringSit = true; // ✅ legs crossed while sitting — required
         ctx.accumulatedHoldMs += deltaMs;
-        // PDF Rule 5: Sit down on the floor for 2 seconds
+        // Rule 5: Sit down on the floor for 2 seconds
         if (ctx.accumulatedHoldMs >= 2000) {
           ctx.currentState = PoseState.SITTING_DOWN;
           ctx.stateEnteredAtMs = timestampMs;
           ctx.accumulatedHoldMs = 0;
           ctx.recommendation = "";
         } else {
-          // Actively holding — show countdown only, not a correction
           const remaining = Math.max(0, 2 - ctx.accumulatedHoldMs / 1000).toFixed(1);
           ctx.message = `Sitting — hold for ${remaining}s more...`;
-          ctx.recommendation = ""; // clear any previous correction
+          ctx.recommendation = "";
         }
       } else {
-        // Only flag as correction AFTER a successful hold started and then broke
         ctx.accumulatedHoldMs = Math.max(0, ctx.accumulatedHoldMs - (deltaMs * 1.5));
         if (ctx.accumulatedHoldMs === 0) {
           if (ctx.debugInfo.sitting && !ctx.debugInfo.legsCrossed) {
@@ -198,17 +222,17 @@ export const evaluatePose = (
     case PoseState.SITTING_DOWN:
       ctx.message = "Great! Drive one knee forward to touch the floor.";
       if (ctx.debugInfo.kneeTouching && ctx.debugInfo.legsCrossed) {
+        ctx.kneeDidTouch = true; // ✅ knee touched floor — required
         ctx.accumulatedHoldMs += deltaMs;
-        // PDF Rule 7: Maintain this posture for 1 second
+        // Rule 7: Maintain this posture for 1 second
         if (ctx.accumulatedHoldMs >= 1000) {
           ctx.currentState = PoseState.KNEE_TOUCH;
           ctx.accumulatedHoldMs = 0;
           ctx.recommendation = "";
         } else {
-          // Actively holding — show countdown only, not a correction
           const remaining = Math.max(0, 1 - ctx.accumulatedHoldMs / 1000).toFixed(1);
           ctx.message = `Knee on floor — hold for ${remaining}s more...`;
-          ctx.recommendation = ""; // clear any previous correction
+          ctx.recommendation = "";
         }
       } else {
         ctx.accumulatedHoldMs = Math.max(0, ctx.accumulatedHoldMs - (deltaMs * 1.5));
@@ -224,8 +248,9 @@ export const evaluatePose = (
 
     case PoseState.KNEE_TOUCH:
       ctx.message = "Knee touched! Uncross legs and fall back into a deep squat.";
-      // PDF Rule 8: Once knee is on the ground, remove the crossed leg and fall back to sit on deep squat
+      // Rule 8: Once knee is on the ground, remove the crossed leg and fall back to sit on deep squat
       if (ctx.debugInfo.deepSquat && !ctx.debugInfo.legsCrossed) {
+        ctx.deepSquatReached = true; // ✅ deep squat reached — required
         ctx.currentState = PoseState.DEEP_SQUAT;
         ctx.accumulatedHoldMs = 0;
         ctx.recommendation = "";
@@ -239,16 +264,52 @@ export const evaluatePose = (
     case PoseState.DEEP_SQUAT:
       ctx.message = "Deep squat locked! Stand tall with heels grounded to finish the rep.";
       
-      // Must return to a fully standing tall position to increment rep
+      // Must return to a fully standing tall position to complete the rep
       if (ctx.debugInfo.isStanding) {
-        // Save the failures recorded during this rep
+        const repNum = ctx.reps + 1;
+
+        // Determine disqualifying failures
+        const disqualifyingReasons: string[] = [];
+        if (!ctx.legsWereCrossedDuringSit) {
+          disqualifyingReasons.push(CRITICAL_FAILURES.LEGS_NOT_CROSSED_SITTING);
+        }
+        if (!ctx.kneeDidTouch) {
+          disqualifyingReasons.push(CRITICAL_FAILURES.KNEE_DID_NOT_TOUCH);
+        }
+        if (!ctx.deepSquatReached) {
+          disqualifyingReasons.push(CRITICAL_FAILURES.DEEP_SQUAT_NOT_PERFORMED);
+        }
+
+        const isValidRep = disqualifyingReasons.length === 0;
+        const pointsAwarded = isValidRep ? 8 : 0;
+
+        const status: RepStatus = {
+          repNumber: repNum,
+          valid: isValidRep,
+          pointsAwarded,
+          disqualifyingReasons,
+          formCorrections: Array.from(ctx.currentRepFailures),
+        };
+
+        ctx.repStatus.push(status);
         ctx.repFeedback.push(Array.from(ctx.currentRepFailures));
-        ctx.currentRepFailures = new Set<string>(); // reset for next rep
-        
+        ctx.currentRepFailures = new Set<string>();
+        ctx.currentRepCriticalFailures = new Set<string>();
+
+        // Reset per-rep tracking flags
+        ctx.legsWereCrossedDuringSit = false;
+        ctx.kneeDidTouch = false;
+        ctx.deepSquatReached = false;
+
         ctx.reps++;
-        ctx.score += 8;
+        ctx.score += pointsAwarded;
         ctx.currentState = PoseState.STANDING_START;
-        ctx.message = `Rep ${ctx.reps} Complete! +8 points.`;
+        
+        if (isValidRep) {
+          ctx.message = `Rep ${ctx.reps} Complete! ✅ +8 points.`;
+        } else {
+          ctx.message = `Rep ${ctx.reps} — ❌ 0 pts (${disqualifyingReasons.length} disqualifying issue${disqualifyingReasons.length > 1 ? 's' : ''}).`;
+        }
         ctx.recommendation = "";
       } else {
         ctx.recommendation = "Push up through your heels until you are standing completely straight.";

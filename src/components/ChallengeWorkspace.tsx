@@ -4,7 +4,7 @@ import { Activity, CheckCircle2 } from 'lucide-react';
 import { usePoseTracker } from '../hooks/usePoseTracker';
 import { drawSkeleton } from '../utils/drawing';
 import { evaluatePose, INITIAL_CONTEXT, PoseState, POSE_STATE_NAMES } from '../utils/rulesEngine';
-import type { TrackingContext } from '../utils/rulesEngine';
+import type { TrackingContext, RepStatus } from '../utils/rulesEngine';
 import { publishRep } from '../utils/firebase';
 
 
@@ -245,57 +245,70 @@ export const ChallengeWorkspace = () => {
           </div>
         </div>
       </div>
-      
-      {/* Rep-wise Form Correction Table */}
+         {/* Rep-wise Form Correction Table */}
       <div style={{ gridColumn: 'span 12', paddingBottom: '2rem' }}>
         <div className="glass" style={{ padding: '2rem' }}>
-          <h3 style={{ fontSize: '1.25rem', marginBottom: '1.5rem', fontWeight: 600 }}>Rep-wise Form Validations & Corrections</h3>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '800px' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  <th style={{ padding: '1rem', color: 'var(--text-secondary)', fontWeight: 600, width: '40%' }}>Validation Rule / Correction</th>
-                  {[...Array(10)].map((_, i) => (
-                    <th key={i} style={{ padding: '1rem', color: 'var(--text-secondary)', fontWeight: 600, textAlign: 'center' }}>Rep {i + 1}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {/* Aggregate all unique rules that have ever been recommended across all reps */}
-                {Array.from(new Set(context.repFeedback.flat())).length === 0 ? (
-                  <tr>
-                    <td colSpan={11} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                      No form corrections recorded yet. Complete a rep to see feedback!
-                    </td>
+          <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem', fontWeight: 600 }}>Rep-wise Form Validations &amp; Corrections</h3>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', marginBottom: '1.5rem' }}>
+            🟢 Valid rep = 8 pts &nbsp;|&nbsp; 🔴 Invalid rep = 0 pts (disqualified) &nbsp;|&nbsp; ⚠ Form correction logged
+          </p>
+          {context.repStatus.length === 0 ? (
+            <p style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: '2rem' }}>No reps completed yet. Finish a rep to see feedback!</p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '600px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                    <th style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Rep</th>
+                    <th style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Status</th>
+                    <th style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Points</th>
+                    <th style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Disqualifying Reasons</th>
+                    <th style={{ padding: '0.75rem 1rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Form Corrections</th>
                   </tr>
-                ) : (
-                  Array.from(new Set(context.repFeedback.flat())).map((rule, ruleIdx) => (
-                    <tr key={ruleIdx} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td style={{ padding: '1rem', color: 'var(--text-primary)' }}>{rule}</td>
-                      {[...Array(10)].map((_, repIdx) => {
-                        // Reps not yet started
-                        if (repIdx > context.reps) return <td key={repIdx} style={{ padding: '1rem', textAlign: 'center', color: 'var(--border)' }}>-</td>;
-                        
-                        // Current rep in progress (or completed reps)
-                        const feedbackForRep = repIdx < context.repFeedback.length ? context.repFeedback[repIdx] : Array.from(context.currentRepFailures);
-                        const hasFailure = feedbackForRep.includes(rule);
-                        
-                        return (
-                          <td key={repIdx} style={{ padding: '1rem', textAlign: 'center' }}>
-                            {hasFailure ? (
-                              <span style={{ color: 'var(--error)', fontWeight: 'bold' }}>✗</span>
-                            ) : (
-                              <span style={{ color: 'var(--success)' }}>✓</span>
-                            )}
-                          </td>
-                        );
-                      })}
+                </thead>
+                <tbody>
+                  {context.repStatus.map((rep: RepStatus) => (
+                    <tr 
+                      key={rep.repNumber}
+                      style={{ 
+                        borderBottom: '1px solid var(--border)',
+                        background: rep.valid ? 'rgba(16,185,129,0.04)' : 'rgba(239,68,68,0.05)'
+                      }}
+                    >
+                      <td style={{ padding: '0.75rem 1rem', fontWeight: 700, color: 'var(--text-primary)' }}>Rep {rep.repNumber}</td>
+                      <td style={{ padding: '0.75rem 1rem' }}>
+                        {rep.valid
+                          ? <span style={{ color: 'var(--success)', fontWeight: 700 }}>✅ Valid</span>
+                          : <span style={{ color: 'var(--error)', fontWeight: 700 }}>❌ Invalid</span>
+                        }
+                      </td>
+                      <td style={{ padding: '0.75rem 1rem', fontWeight: 700, color: rep.valid ? 'var(--success)' : 'var(--error)' }}>
+                        {rep.valid ? '+8 pts' : '0 pts'}
+                      </td>
+                      <td style={{ padding: '0.75rem 1rem' }}>
+                        {rep.disqualifyingReasons.length === 0 ? (
+                          <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>None</span>
+                        ) : (
+                          <ul style={{ margin: 0, padding: '0 0 0 1rem', fontSize: '0.78rem', color: 'var(--error)' }}>
+                            {rep.disqualifyingReasons.map((r, i) => <li key={i}>{r}</li>)}
+                          </ul>
+                        )}
+                      </td>
+                      <td style={{ padding: '0.75rem 1rem' }}>
+                        {rep.formCorrections.length === 0 ? (
+                          <span style={{ color: 'var(--success)', fontSize: '0.8rem' }}>✓ Clean form</span>
+                        ) : (
+                          <ul style={{ margin: 0, padding: '0 0 0 1rem', fontSize: '0.78rem', color: 'var(--warning)' }}>
+                            {rep.formCorrections.map((c, i) => <li key={i}>⚠ {c}</li>)}
+                          </ul>
+                        )}
+                      </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </div>
